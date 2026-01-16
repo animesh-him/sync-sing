@@ -70,7 +70,14 @@
   video, audio {
     width: 100%;
     margin-top: 10px;
-    display: none;
+  }
+
+  video {
+    display: block; /* default to video autoplay */
+  }
+
+  audio {
+    display: none; /* audio hidden until toggle */
   }
 </style>
 </head>
@@ -98,19 +105,8 @@
 
 <script>
 /* ================= CONFIG ================= */
-
 const WORKER_URL = "https://sync-sing-worker.animesh-him.workers.dev/";
-
-/*
-  Replace the hash below with YOUR admin secret hash.
-  How to generate:
-  https://emn178.github.io/online-tools/sha256.html
-  1. Open browser console
-  2. Run: await crypto.subtle.digest("SHA-256", new TextEncoder().encode("YOUR_SECRET"))
-  3. Convert to hex
-*/
 const ADMIN_HASH = "7362967ee5afb4708168fa602116d7e2a17127feaf8b0d8ab5034726de88b5d4";
-
 /* ========================================= */
 
 const video = document.getElementById("video");
@@ -119,7 +115,7 @@ const badge = document.getElementById("liveBadge");
 const adminUI = document.getElementById("adminControls");
 
 let isAdmin = false;
-let mode = "audio"; // audio | video
+let mode = "video"; // video auto by default
 
 async function sha256(text) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -140,30 +136,34 @@ async function sha256(text) {
 
 /* ===== SYNC ===== */
 async function sync() {
-  const res = await fetch(WORKER_URL);
-  const state = await res.json();
+  try {
+    const res = await fetch(WORKER_URL);
+    const state = await res.json();
 
-  if (!state.isLive) {
-    badge.textContent = "OFFLINE";
-    badge.classList.remove("on");
-    audio.pause();
-    video.pause();
-    return;
+    if (!state.isLive) {
+      badge.textContent = "OFFLINE";
+      badge.classList.remove("on");
+      audio.pause();
+      video.pause();
+      return;
+    }
+
+    badge.textContent = "LIVE";
+    badge.classList.add("on");
+
+    const now = Date.now();
+    const time = state.startedAt ? (now - state.startedAt) / 1000 : 0;
+
+    const player = mode === "audio" ? audio : video;
+
+    if (Math.abs(player.currentTime - time) > 1) {
+      player.currentTime = time;
+    }
+
+    player.play().catch(e => console.log("Playback error:", e));
+  } catch (err) {
+    console.log("Sync error:", err);
   }
-
-  badge.textContent = "LIVE";
-  badge.classList.add("on");
-
-  const now = Date.now();
-  const time = (now - state.startedAt) / 1000;
-
-  const player = mode === "audio" ? audio : video;
-
-  if (Math.abs(player.currentTime - time) > 1) {
-    player.currentTime = time;
-  }
-
-  player.play().catch(()=>{});
 }
 
 setInterval(sync, 3000);
@@ -179,6 +179,8 @@ async function goLive() {
       startedAt: Date.now()
     })
   });
+  badge.textContent = "LIVE";
+  badge.classList.add("on");
 }
 
 async function stopLive() {
@@ -186,10 +188,10 @@ async function stopLive() {
   await fetch(WORKER_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      isLive: false
-    })
+    body: JSON.stringify({ isLive: false })
   });
+  badge.textContent = "OFFLINE";
+  badge.classList.remove("on");
 }
 
 /* ===== MODE TOGGLE ===== */

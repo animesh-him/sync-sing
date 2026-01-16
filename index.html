@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Sync-Sing</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<style>
+  body {
+    margin: 0;
+    background: #000;
+    color: #eaeaea;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+  }
+
+  .card {
+    width: 320px;
+    text-align: center;
+  }
+
+  .title {
+    font-size: 20px;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+
+  .live {
+    display: inline-block;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: #222;
+    margin-bottom: 15px;
+  }
+
+  .live.on {
+    background: #b00020;
+    color: #fff;
+  }
+
+  button {
+    background: #111;
+    color: #fff;
+    border: 1px solid #333;
+    padding: 10px 14px;
+    margin: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  button:hover {
+    background: #1c1c1c;
+  }
+
+  .admin {
+    margin-top: 10px;
+    display: none;
+  }
+
+  .footer {
+    margin-top: 14px;
+    font-size: 11px;
+    color: #777;
+  }
+
+  video, audio {
+    width: 100%;
+    margin-top: 10px;
+    display: none;
+  }
+</style>
+</head>
+
+<body>
+<div class="card">
+
+  <div class="title">SYNC-SING</div>
+  <div id="liveBadge" class="live">OFFLINE</div>
+
+  <video id="video" src="track.mp4" playsinline></video>
+  <audio id="audio" src="track.mp3" preload="auto"></audio>
+
+  <div class="admin" id="adminControls">
+    <button onclick="goLive()">▶ GO LIVE</button>
+    <button onclick="stopLive()">■ STOP</button>
+    <button onclick="toggleMode()">🎧 / 🎥</button>
+  </div>
+
+  <div class="footer">
+    Live synchronized stream
+  </div>
+
+</div>
+
+<script>
+/* ================= CONFIG ================= */
+
+const WORKER_URL = "https://YOUR-WORKER-NAME.workers.dev";
+
+/*
+  Replace the hash below with YOUR admin secret hash.
+  How to generate:
+  1. Open browser console
+  2. Run: await crypto.subtle.digest("SHA-256", new TextEncoder().encode("YOUR_SECRET"))
+  3. Convert to hex
+*/
+const ADMIN_HASH = "REPLACE_WITH_YOUR_SHA256_HASH";
+
+/* ========================================= */
+
+const video = document.getElementById("video");
+const audio = document.getElementById("audio");
+const badge = document.getElementById("liveBadge");
+const adminUI = document.getElementById("adminControls");
+
+let isAdmin = false;
+let mode = "audio"; // audio | video
+
+async function sha256(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/* ===== ADMIN AUTH ===== */
+(async () => {
+  const secret = new URLSearchParams(location.search).get("key");
+  if (!secret) return;
+
+  const hash = await sha256(secret);
+  if (hash === ADMIN_HASH) {
+    isAdmin = true;
+    adminUI.style.display = "block";
+  }
+})();
+
+/* ===== SYNC ===== */
+async function sync() {
+  const res = await fetch(WORKER_URL);
+  const state = await res.json();
+
+  if (!state.isLive) {
+    badge.textContent = "OFFLINE";
+    badge.classList.remove("on");
+    audio.pause();
+    video.pause();
+    return;
+  }
+
+  badge.textContent = "LIVE";
+  badge.classList.add("on");
+
+  const now = Date.now();
+  const time = (now - state.startedAt) / 1000;
+
+  const player = mode === "audio" ? audio : video;
+
+  if (Math.abs(player.currentTime - time) > 1) {
+    player.currentTime = time;
+  }
+
+  player.play().catch(()=>{});
+}
+
+setInterval(sync, 3000);
+
+/* ===== ADMIN ACTIONS ===== */
+async function goLive() {
+  if (!isAdmin) return;
+  await fetch(WORKER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      isLive: true,
+      startedAt: Date.now()
+    })
+  });
+}
+
+async function stopLive() {
+  if (!isAdmin) return;
+  await fetch(WORKER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      isLive: false
+    })
+  });
+}
+
+/* ===== MODE TOGGLE ===== */
+function toggleMode() {
+  if (mode === "audio") {
+    audio.pause();
+    audio.style.display = "none";
+    video.style.display = "block";
+    mode = "video";
+  } else {
+    video.pause();
+    video.style.display = "none";
+    audio.style.display = "block";
+    mode = "audio";
+  }
+}
+</script>
+</body>
+</html>
